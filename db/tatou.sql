@@ -54,3 +54,8 @@ CREATE TABLE IF NOT EXISTS `Versions` (
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- Create application user and grant privileges
+CREATE USER IF NOT EXISTS 'Konoha'@'%' IDENTIFIED BY '4Ce939154f!!';
+GRANT ALL PRIVILEGES ON tatou.* TO 'Konoha'@'%';
+FLUSH PRIVILEGES;
+
