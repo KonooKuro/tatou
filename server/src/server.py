@@ -1,3 +1,4 @@
+# Remember to remove all database error informations which show to public -> return jsonify({"error": f"database error: {str(e)}"}), 503
 import os
 import io
 import hashlib
@@ -28,7 +29,10 @@ def create_app():
     app = Flask(__name__)
 
     # --- Config ---
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+    #dev-secret-change-me has been removed - Niu 9.17, after flag leaked
+    #I guess this is a core problem of the leak, maybe also cuz me uploaded sample.env to the Github accidentally‌
+    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY")
+
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
@@ -41,6 +45,7 @@ def create_app():
     app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
 
     # --- DB engine only (no Table metadata) ---
+    #Module Checked by Niu at 9.17, no issues
     def db_url() -> str:
         return (
             f"mysql+pymysql://{app.config['DB_USER']}:{app.config['DB_PASSWORD']}"
@@ -55,6 +60,7 @@ def create_app():
         return eng
 
     # --- Helpers ---
+    #Module Checked by Niu at 9.17, no issues
     def _serializer():
         return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
 
@@ -86,7 +92,7 @@ def create_app():
         return h.hexdigest()
 
     # --- Routes ---
-    
+    #Here, actually we dont want users access these codes - Niu 9.17
     @app.route("/<path:filename>")
     def static_files(filename):
         return app.send_static_file(filename)
@@ -150,8 +156,10 @@ def create_app():
                     text("SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"),
                     {"email": email},
                 ).first()
+        # if someone trigger error here with malicious? - Niu
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            app.logger.error("Login query failed for email=%s: %s", email, e)
+            return jsonify({"error": "database error"}), 503 # Not show the information to the users
 
         if not row or not check_password_hash(row.hpassword, password):
             return jsonify({"error": "invalid credentials"}), 401
@@ -165,20 +173,45 @@ def create_app():
     def upload_document():
         if "file" not in request.files:
             return jsonify({"error": "file is required (multipart/form-data)"}), 400
+        
         file = request.files["file"]
         if not file or file.filename == "":
             return jsonify({"error": "empty filename"}), 400
+        
+        safe_name = secure_filename(file.filename)
+        if not safe_name.lower().endswith(".pdf"):
+            return jsonify({"error": "only PDF files allowed"}), 400
+        if request.content_length and request.content_length > 20 * 1024 * 1024:
+            return jsonify({"error": "file too large (20MB max)"}), 413
+        
+        head = file.stream.read(5)
+        file.stream.seek(0)
+        if head != b"%PDF-":
+            return jsonify({"error": "file is not a valid PDF"}), 400
 
-        fname = file.filename
+        # Attack 1, directly concatenating `file.filename` to the path allows attackers to pass filenames such as `../../etc/passwd`, resulting in path traversal. - Niu
+        # fname = file.filename
 
-        user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
+        user_dir = app.config["STORAGE_DIR"] / "files" / str(g.user["id"]) #login -> id, login may cause injection issues
         user_dir.mkdir(parents=True, exist_ok=True)
 
         ts = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
-        final_name = request.form.get("name") or fname
-        stored_name = f"{ts}__{fname}"
+        #Use safer stored way
+        stored_name = f"{ts}__{safe_name}"
         stored_path = user_dir / stored_name
-        file.save(stored_path)
+        try:
+            stored_path = stored_path.resolve()
+            if not str(stored_path).startswith(str(user_dir.resolve())):
+                return jsonify({"error": "invalid file path"}), 400
+        except (OSError, ValueError):
+            return jsonify({"error": "invalid file path"}), 400
+        
+        try:
+            with stored_path.open("wb") as f:
+                file.save(f)
+        except Exception:
+            app.logger.exception("failed to save uploaded file")
+            return jsonify({"error": "file save error"}), 500
 
         sha_hex = _sha256_file(stored_path)
         size = stored_path.stat().st_size
@@ -191,7 +224,7 @@ def create_app():
                         VALUES (:name, :path, :ownerid, UNHEX(:sha256hex), :size)
                     """),
                     {
-                        "name": final_name,
+                        "name": safe_name,
                         "path": str(stored_path),
                         "ownerid": int(g.user["id"]),
                         "sha256hex": sha_hex,
@@ -208,7 +241,8 @@ def create_app():
                     {"id": did},
                 ).one()
         except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+            app.logger.error(f"DB error inserting document: {e}", exc_info=True)
+            return jsonify({"error": "internal server error"}), 503
 
         return jsonify({
             "id": int(row.id),
@@ -219,6 +253,7 @@ def create_app():
         }), 201
 
     # GET /api/list-documents
+    # Checked by Niu
     @app.get("/api/list-documents")
     @require_auth
     def list_documents():
@@ -233,8 +268,10 @@ def create_app():
                     """),
                     {"uid": int(g.user["id"])},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("DB error listing documents")
+            return jsonify({"error": "internal server error"}), 503
+
 
         docs = [{
             "id": int(r.id),
@@ -272,15 +309,17 @@ def create_app():
                     """),
                     {"glogin": str(g.user["login"]), "did": document_id},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("DB error listing versions")
+            return jsonify({"error": "internal server error"}), 503
+
 
         versions = [{
             "id": int(r.id),
             "documentid": int(r.documentid),
             "link": r.link,
             "intended_for": r.intended_for,
-            "secret": r.secret,
+            "secret": r.secret,  # secret refers what? - Niu  -> "has_secret": bool(r.secret)
             "method": r.method,
         } for r in rows]
         return jsonify({"versions": versions}), 200
@@ -298,12 +337,15 @@ def create_app():
                         FROM Users u
                         JOIN Documents d ON d.ownerid = u.id
                         JOIN Versions v ON d.id = v.documentid
-                        WHERE u.login = :glogin
+                        WHERE d.ownerid = :uid
+                        ORDER BY v.id DESC
                     """),
-                    {"glogin": str(g.user["login"])},
+                    {"uid": int(g.user["id"])},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("DB error listing all versions")
+            return jsonify({"error": "internal server error"}), 503
+
 
         versions = [{
             "id": int(r.id),
@@ -328,6 +370,10 @@ def create_app():
             except (TypeError, ValueError):
                 return jsonify({"error": "document id required"}), 400
         
+        # ID Verify -> is this also can be used for attack?
+        if document_id <= 0 or document_id > 2**31:
+            return jsonify({"error": "invalid document id"}), 400
+        
         try:
             with get_engine().connect() as conn:
                 row = conn.execute(
@@ -339,34 +385,41 @@ def create_app():
                     """),
                     {"id": document_id, "uid": int(g.user["id"])},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("DB error fetching document")
+            return jsonify({"error": "internal server error"}), 503
+
 
         # Don’t leak whether a doc exists for another user
         if not row:
+            app.logger.info(f"User {g.user['id']} attempted to access non-existent document {document_id}")
             return jsonify({"error": "document not found"}), 404
 
-        file_path = Path(row.path)
-
-        # Basic safety: ensure path is inside STORAGE_DIR and exists
+        # Basic safety: ensure path is inside STORAGE_DIR and exists # Not quite understand this part -> following parts with GPT guidance
         try:
-            file_path.resolve().relative_to(app.config["STORAGE_DIR"].resolve())
+            file_abs = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
         except Exception:
             # Path looks suspicious or outside storage
             return jsonify({"error": "document path invalid"}), 500
 
-        if not file_path.exists():
+        if not file_abs.exists() or not file_abs.is_file():
             return jsonify({"error": "file missing on disk"}), 410
+        
+        # Add safe download
+        name = (row.name or file_abs.name)
+        safe_name = secure_filename(name)
+        if not safe_name.lower().endswith(".pdf"):
+            safe_name += ".pdf"
 
-        # Serve inline with caching hints + ETag based on stored sha256
+        # Serve inline with caching hints + ETag based on stored sha256 -> Not understand
         resp = send_file(
-            file_path,
+            file_abs,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.name if row.name.lower().endswith(".pdf") else f"{row.name}.pdf",
-            conditional=True,   # enables 304 if If-Modified-Since/Range handling
+            download_name=safe_name,
+            conditional=True,   # enables 304 if If-Modified-Since/Range handling -> Still not understand...
             max_age=0,
-            last_modified=file_path.stat().st_mtime,
+            last_modified=file_abs.stat().st_mtime,
         )
         # Strong validator
         if isinstance(row.sha256_hex, str) and row.sha256_hex:
@@ -375,7 +428,7 @@ def create_app():
         resp.headers["Cache-Control"] = "private, max-age=0, must-revalidate"
         return resp
     
-    # GET /api/get-version/<link>  → returns the watermarked PDF (inline)
+    # GET /api/get-version/<link>  → returns the watermarked PDF (inline) -> Similar changes with above
     @app.get("/api/get-version/<link>")
     def get_version(link: str):
         
@@ -390,40 +443,44 @@ def create_app():
                     """),
                     {"link": link},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("DB error fetching document")
+            return jsonify({"error": "internal server error"}), 503
 
         # Don’t leak whether a doc exists for another user
         if not row:
+            app.logger.info("Version %s not found or not owned", link)
             return jsonify({"error": "document not found"}), 404
-
-        file_path = Path(row.path)
 
         # Basic safety: ensure path is inside STORAGE_DIR and exists
         try:
-            file_path.resolve().relative_to(app.config["STORAGE_DIR"].resolve())
+            file_abs = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
         except Exception:
             # Path looks suspicious or outside storage
             return jsonify({"error": "document path invalid"}), 500
 
-        if not file_path.exists():
+        if not file_abs.exists() or not file_abs.is_file():
             return jsonify({"error": "file missing on disk"}), 410
+
+        safe_name = secure_filename(row.link or file_abs.name)
+        if not safe_name.lower().endswith(".pdf"):
+            safe_name += ".pdf"
 
         # Serve inline with caching hints + ETag based on stored sha256
         resp = send_file(
-            file_path,
+            file_abs,
             mimetype="application/pdf",
             as_attachment=False,
-            download_name=row.link if row.link.lower().endswith(".pdf") else f"{row.link}.pdf",
+            download_name=safe_name,
             conditional=True,   # enables 304 if If-Modified-Since/Range handling
             max_age=0,
-            last_modified=file_path.stat().st_mtime,
+            last_modified=file_abs.stat().st_mtime,
         )
 
         resp.headers["Cache-Control"] = "private, max-age=0"
         return resp
     
-    # Helper: resolve path safely under STORAGE_DIR (handles absolute/relative)
+    # Helper: resolve path safely under STORAGE_DIR (handles absolute/relative) -> :)
     def _safe_resolve_under_storage(p: str, storage_root: Path) -> Path:
         storage_root = storage_root.resolve()
         fp = Path(p)
@@ -444,51 +501,61 @@ def create_app():
     # DELETE /api/delete-document  (and variants)
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
+    @require_auth # auth then delete
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
-        if not document_id:
-            document_id = (
+        if document_id is None:
+            raw = (
                 request.args.get("id")
                 or request.args.get("documentid")
-                or (request.is_json and (request.get_json(silent=True) or {}).get("id"))
+                or ((request.is_json and request.get_json(silent=True) or {}).get("id"))
             )
         try:
-            doc_id = document_id
+            document_id = int(raw)
         except (TypeError, ValueError):
             return jsonify({"error": "document id required"}), 400
+        
+        if document_id <= 0 or document_id > 2**31:
+            return jsonify({"error": "invalid document id"}), 400
 
-        # Fetch the document (enforce ownership)
+        # Fetch the document (enforce ownership) -> Avoid injection
         try:
             with get_engine().connect() as conn:
-                query = "SELECT * FROM Documents WHERE id = " + doc_id
-                row = conn.execute(text(query)).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
-
+                row = conn.execute(
+                    text("""
+                        SELECT id, path
+                        FROM Documents
+                        WHERE id = :id AND ownerid = :uid
+                        LIMIT 1
+                    """),
+                    {"id": document_id, "uid": int(g.user["id"])},
+                ).first()
+        except Exception:
+            app.logger.exception("DB error selecting document for delete")
+            return jsonify({"error": "internal server error"}), 503
+        
         if not row:
-            # Don’t reveal others’ docs—just say not found
+            app.logger.info("Delete: doc %s not found or not owned by user %s", document_id, g.user["id"])
             return jsonify({"error": "document not found"}), 404
 
         # Resolve and delete file (best effort)
-        storage_root = Path(app.config["STORAGE_DIR"])
         file_deleted = False
         file_missing = False
-        delete_error = None
         try:
-            fp = _safe_resolve_under_storage(row.path, storage_root)
+            fp = _safe_resolve_under_storage(row.path, Path(app.config["STORAGE_DIR"]))
             if fp.exists():
-                try:
-                    fp.unlink()
-                    file_deleted = True
-                except Exception as e:
-                    delete_error = f"failed to delete file: {e}"
-                    app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
+                if fp.is_file():
+                    try:
+                        fp.unlink()
+                        file_deleted = True
+                    except Exception:
+                        app.logger.warning("Failed to delete file %s for doc id=%s", fp, row.id, exc_info=True)
+                else:
+                    app.logger.warning("Path is not a regular file: %s (doc id=%s)", fp, row.id)
             else:
                 file_missing = True
-        except RuntimeError as e:
-            # Path escapes storage root; refuse to touch the file
-            delete_error = str(e)
-            app.logger.error("Path safety check failed for doc id=%s: %s", row.id, e)
+        except RuntimeError:
+            app.logger.error("Path safety check failed for doc id=%s (path=%s)", row.id, row.path, exc_info=True)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
         try:
@@ -496,18 +563,17 @@ def create_app():
                 # If your schema does NOT have ON DELETE CASCADE on Version.documentid,
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
-                conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
-        except Exception as e:
-            return jsonify({"error": f"database error during delete: {str(e)}"}), 503
-
+                conn.execute(text("DELETE FROM Documents WHERE id = :id AND ownerid = :uid"), {"id": document_id, "uid": int(g.user["id"])})
+        except Exception:
+            app.logger.exception("DB error deleting document row")
+            return jsonify({"error": "internal server error"}), 503
+        
         return jsonify({
             "deleted": True,
-            "id": doc_id,
+            "id": document_id,
             "file_deleted": file_deleted,
             "file_missing": file_missing,
-            "note": delete_error,   # null/omitted if everything was fine
         }), 200
-        
         
     # POST /api/create-watermark or /api/create-watermark/<id>  → create watermarked pdf and returns metadata
     @app.post("/api/create-watermark")
@@ -657,6 +723,8 @@ def create_app():
         
         
     @app.post("/api/load-plugin")
+
+    #Remote control problem
     @require_auth
     def load_plugin():
         """
@@ -665,7 +733,7 @@ def create_app():
         Body: { "filename": "MyMethod.pkl", "overwrite": false }
         """
         payload = request.get_json(silent=True) or {}
-        filename = (payload.get("filename") or "").strip()
+        filename = (payload.get("filename") or "").strip() #Unsafe user input
         overwrite = bool(payload.get("overwrite", False))
 
         if not filename:
