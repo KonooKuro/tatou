@@ -16,7 +16,7 @@ or unauthorized *verification*. Anyone who has access to the bytes can
 recover the secret content, but only callers with the correct key will be
 able to validate it via :meth:`read_secret`.
 
-No third‑party libraries are required here; only the standard library is
+No third-party libraries are required here; only the standard library is
 used. (Other watermarking methods may use PyMuPDF / ``fitz``.)
 """
 from __future__ import annotations
@@ -33,25 +33,27 @@ from watermarking_method import (
     WatermarkingError,
     WatermarkingMethod,
     load_pdf_bytes,
+    PdfSource,  # Shen 9.20: added import for proper typing
 )
 
 
 class AddAfterEOF(WatermarkingMethod):
     """Toy method that appends a watermark record after the PDF EOF.
 
-    Format (all ASCII/UTF‑8):
+    Format (all ASCII/UTF-8):
 
     .. code-block:: text
 
         <original PDF bytes ...>%%EOF\n
         %%WM-ADD-AFTER-EOF:v1\n
         <base64url(JSON payload)>\n
+
     The JSON payload schema (version 1):
 
-    ``{"v":1,"alg":"HMAC-SHA256","mac":"<hex>","secret":"<b64>"}``
+    {"v":1,"alg":"HMAC-SHA256","mac":"<hex>","secret":"<b64>"}
 
-    The MAC is computed over ``b"wm:add-after-eof:v1:" + secret_bytes``
-    using the caller-provided ``key`` (UTF‑8) and HMAC‑SHA256.
+    The MAC is computed over b"wm:add-after-eof:v1:" + secret_bytes
+    using the caller-provided key (UTF-8) and HMAC-SHA256.
     """
 
     name: Final[str] = "toy-eof"
@@ -63,7 +65,7 @@ class AddAfterEOF(WatermarkingMethod):
     # ---------------------
     # Public API overrides
     # ---------------------
-    
+
     @staticmethod
     def get_usage() -> str:
         return "Toy method that appends a watermark record after the PDF EOF. Position is ignored."
@@ -89,29 +91,26 @@ class AddAfterEOF(WatermarkingMethod):
         payload = self._build_payload(secret, key)
 
         # Append after the last EOF marker; if none is found (rare in
-        # malformed PDFs), we still append at the end, since most parsers
-        # will stop at the first '%%EOF' they encounter.
-        # We do not alter the original bytes to preserve determinism and
-        # avoid invalidating existing xref tables.
+        # malformed PDFs), we still append at the end.
         out = data
         if not out.endswith(b"\n"):
             out += b"\n"
         out += self._MAGIC + payload + b"\n"
         return out
-        
+
     def is_watermark_applicable(
         self,
         pdf: PdfSource,
         position: str | None = None,
     ) -> bool:
+        # Shen 9.20: This method does not depend on position → always True
         return True
-    
 
     def read_secret(self, pdf, key: str) -> str:
         """Extract the secret if present and authenticated by ``key``.
 
-        Raises :class:`SecretNotFoundError` when the marker/payload is not
-        found or is malformed. Raises :class:`InvalidKeyError` if the MAC
+        Raises SecretNotFoundError when the marker/payload is not
+        found or is malformed. Raises InvalidKeyError if the MAC
         does not validate under the given key.
         """
         data = load_pdf_bytes(pdf)
@@ -123,7 +122,6 @@ class AddAfterEOF(WatermarkingMethod):
             raise SecretNotFoundError("No AddAfterEOF watermark found")
 
         start = idx + len(self._MAGIC)
-        # Payload ends at the next newline or EOF
         end_nl = data.find(b"\n", start)
         end = len(data) if end_nl == -1 else end_nl
         b64_payload = data[start:end].strip()
@@ -133,26 +131,30 @@ class AddAfterEOF(WatermarkingMethod):
         try:
             payload_json = base64.urlsafe_b64decode(b64_payload)
             payload = json.loads(payload_json)
-        except Exception as exc:  # broad: malformed or tampered
+        except Exception as exc:
             raise SecretNotFoundError("Malformed watermark payload") from exc
 
         if not (isinstance(payload, dict) and payload.get("v") == 1):
             raise SecretNotFoundError("Unsupported watermark version or format")
         if payload.get("alg") != "HMAC-SHA256":
-            raise WatermarkingError("Unsupported MAC algorithm: %r" % payload.get("alg"))
+            raise WatermarkingError(f"Unsupported MAC algorithm: {payload.get('alg')}")
 
         try:
-            mac_hex = str(payload["mac"])  # stored as hex string
+            mac_hex = str(payload["mac"])
+            if not all(c in "0123456789abcdef" for c in mac_hex.lower()):
+                raise ValueError("MAC not valid hex")
             secret_b64 = str(payload["secret"]).encode("ascii")
             secret_bytes = base64.b64decode(secret_b64)
+            secret_str = secret_bytes.decode("utf-8")
         except Exception as exc:
+            # Shen 9.20: ensure invalid field values do not crash
             raise SecretNotFoundError("Invalid payload fields") from exc
 
         expected = self._mac_hex(secret_bytes, key)
         if not hmac.compare_digest(mac_hex, expected):
             raise InvalidKeyError("Provided key failed to authenticate the watermark")
 
-        return secret_bytes.decode("utf-8")
+        return secret_str
 
     # ---------------------
     # Internal helpers
@@ -168,7 +170,6 @@ class AddAfterEOF(WatermarkingMethod):
             "mac": mac_hex,
             "secret": base64.b64encode(secret_bytes).decode("ascii"),
         }
-        # Compact JSON for determinism
         j = json.dumps(obj, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
         return base64.urlsafe_b64encode(j)
 
@@ -179,4 +180,3 @@ class AddAfterEOF(WatermarkingMethod):
 
 
 __all__ = ["AddAfterEOF"]
-

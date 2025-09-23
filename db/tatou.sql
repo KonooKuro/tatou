@@ -1,5 +1,6 @@
 -- Initialize Tatou (armadillo) database schema
 -- Engine: MariaDB / MySQL
+-- Shen 9.20: Adjusted VARCHAR lengths for indexed columns to avoid "Specified key was too long" on utf8mb4
 
 -- Create database (safe if already provided by container env)
 CREATE DATABASE IF NOT EXISTS `tatou`
@@ -11,7 +12,7 @@ USE `tatou`;
 -- Users table
 CREATE TABLE IF NOT EXISTS `Users` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-  `email` VARCHAR(320) NOT NULL,               -- RFC-compliant max length
+  `email` VARCHAR(191) NOT NULL,               -- Shen 9.20: reduced to 191 for safe unique index
   `hpassword` VARCHAR(255) NOT NULL,           -- password hash (argon2/bcrypt/etc)
   `login` VARCHAR(64) NOT NULL,                -- username/handle
   PRIMARY KEY (`id`),
@@ -22,7 +23,7 @@ CREATE TABLE IF NOT EXISTS `Users` (
 CREATE TABLE IF NOT EXISTS `Documents` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `name` VARCHAR(255) NOT NULL,
-  `path` VARCHAR(1024) NOT NULL,               -- storage path on disk/volume
+  `path` VARCHAR(191) NOT NULL,                -- Shen 9.20: reduced to 191 for safe unique index
   `ownerid` BIGINT UNSIGNED NOT NULL,          -- FK to Users(id)
   `creation` DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
   `sha256` BINARY(32) NOT NULL,                -- raw 32-byte hash (UNHEX(hex))
@@ -40,12 +41,12 @@ CREATE TABLE IF NOT EXISTS `Documents` (
 CREATE TABLE IF NOT EXISTS `Versions` (
   `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
   `documentid` BIGINT UNSIGNED NOT NULL,       -- FK to Documents(id)
-  `link` VARCHAR(255) NOT NULL,                -- public token or URL slug
-  `intended_for` VARCHAR(320) NULL,            -- optional email/name
-  `secret` VARCHAR(320) NOT NULL,              -- secret
+  `link` VARCHAR(191) NOT NULL,                -- Shen 9.20: reduced to 191 for safe unique index
+  `intended_for` VARCHAR(320) NULL,            -- optional email/name (no index, safe to keep long)
+  `secret` VARCHAR(320) NOT NULL,              -- secret (no index, safe to keep long)
   `method` VARCHAR(32) NOT NULL,               -- e.g., "text_overlay"
-  `position` TEXT,               -- e.g., "text_overlay"
-  `path` VARCHAR(320) NOT NULL,              -- secret
+  `position` TEXT,                             -- e.g., "text_overlay"
+  `path` VARCHAR(191) NOT NULL,                -- Shen 9.20: reduced to 191 for safety
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_Versions_link` (`link`),
   KEY `ix_Versions_documentid` (`documentid`),
@@ -55,7 +56,7 @@ CREATE TABLE IF NOT EXISTS `Versions` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- Create application user and grant privileges
+-- Shen 9.20: Keep original user creation but note that app connects with DB_USER/DB_PASSWORD from env
 CREATE USER IF NOT EXISTS 'Konoha'@'%' IDENTIFIED BY '4Ce939154f!!';
 GRANT ALL PRIVILEGES ON tatou.* TO 'Konoha'@'%';
 FLUSH PRIVILEGES;
-

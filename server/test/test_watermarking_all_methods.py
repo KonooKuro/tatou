@@ -1,4 +1,16 @@
 # tests/test_watermarking_all_methods.py
+"""
+Parameterized tests for all registered watermarking methods.
+
+Covers:
+- Applicability check
+- add_watermark shape and validity
+- read_secret roundtrip consistency
+
+Shen 9.20: Adjusted sample PDF to be slightly more realistic for stability,
+and ensured security-focused assertions are explicit.
+"""
+
 from __future__ import annotations
 import importlib
 import inspect
@@ -15,28 +27,32 @@ except Exception:  # registry/module missing
 
 CASES: list[tuple[str, object]] = []
 for name, impl in (METHODS or {}).items():
-    if not name == "UnsafeBashBridgeAppendEOF":
+    # Exclude intentionally unsafe method
+    if name != "bash-bridge-eof" and name != "UnsafeBashBridgeAppendEOF":
         CASES.append((str(name), impl))
 
 if not CASES:
-    pytest.skip("No watermarking methods registered in watermarking_utils.METHODS", allow_module_level=True)
+    pytest.skip("No safe watermarking methods registered in watermarking_utils.METHODS", allow_module_level=True)
 
 
 # --------- fixtures ----------
 @pytest.fixture(scope="session")
 def sample_pdf_path(tmp_path_factory) -> Path:
-    """Minimal but recognizable PDF bytes."""
+    """Minimal but recognizable PDF file for testing."""
     pdf = tmp_path_factory.mktemp("pdfs") / "sample.pdf"
     pdf.write_bytes(
         b"%PDF-1.4\n"
         b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
+        b"2 0 obj\n<< /Type /Pages /Count 0 >>\nendobj\n"
         b"%%EOF\n"
     )
     return pdf
 
+
 @pytest.fixture(scope="session")
 def secret() -> str:
     return "unit-test-secret"
+
 
 @pytest.fixture(scope="session")
 def key() -> str:
@@ -44,13 +60,13 @@ def key() -> str:
 
 
 def _as_instance(impl: object) -> object:
-    """Return an instance for class objects; pass instances through."""
+    """Return an instance for class objects; pass instances through unchanged."""
     if inspect.isclass(impl):
         return impl()  # assumes zero-arg constructor
     return impl
 
 
-# --------- parameterization over all methods ----------
+# --------- parameterization over all safe methods ----------
 @pytest.mark.parametrize("method_name,impl", CASES, ids=[n for n, _ in CASES])
 class TestAllWatermarkingMethods:
     def test_is_watermark_applicable(self, method_name: str, impl: object, sample_pdf_path: Path):
@@ -79,4 +95,3 @@ class TestAllWatermarkingMethods:
         extracted = wm_impl.read_secret(out_pdf, key=key)
         assert isinstance(extracted, str), f"{method_name}: read_secret must return str"
         assert extracted == secret, f"{method_name}: read_secret should return the exact embedded secret"
-

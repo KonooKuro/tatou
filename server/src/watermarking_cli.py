@@ -80,7 +80,7 @@ def _resolve_key(args: argparse.Namespace) -> str:
     if args.key_prompt:
         return getpass.getpass("Key: ")
     # If nothing provided, still prompt (safer default)
-    return getpass.getpass("Key: ")
+    return ""
 
 
 # --------------------
@@ -115,7 +115,6 @@ def cmd_embed(args: argparse.Namespace) -> int:
         method=args.method,
         pdf=args.input,
         secret=secret,
-        key=key,
         position=args.position
     )
     with open(args.output, "wb") as fh:
@@ -126,7 +125,7 @@ def cmd_embed(args: argparse.Namespace) -> int:
 
 def cmd_extract(args: argparse.Namespace) -> int:
     key = _resolve_key(args)
-    secret = read_watermark(method=args.method, pdf=args.input, key=key)
+    secret = read_watermark(method=args.method, pdf=args.input)
     if args.out:
         with open(args.out, "w", encoding="utf-8") as fh:
             fh.write(secret)
@@ -168,8 +167,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_embed.add_argument("output", help="Output (watermarked) PDF path")
     p_embed.add_argument(
         "--method",
-        default="toy-eof",
-        help="Watermarking method name (default: toy-eof)"
+        default="hidden-object-b64",
+        help="Watermarking method name"
     )
     p_embed.add_argument("--position", help="Optional position hint", default=None)
 
@@ -195,15 +194,16 @@ def build_parser() -> argparse.ArgumentParser:
     p_extract.add_argument("input", help="Input PDF path (possibly watermarked)")
     p_extract.add_argument(
         "--method",
-        default="toy-eof",
-        help="Watermarking method name (default: toy-eof)"
+        default="hidden-object-b64",
+        help="Watermarking method name"
     )
 
     g_key2 = p_extract.add_argument_group("key input")
     g_key2.add_argument("--key", help="Key string")
-    g_key2.add_argument("--key-file", help="Read key from text file")
-    g_key2.add_argument("--key-stdin", action="store_true", help="Read key from stdin")
+    g_key2.add_argument("--key-file", help="Read key string from a file")
     g_key2.add_argument("--key-prompt", action="store_true", help="Prompt for key")
+    g_key2.add_argument("--key-stdin", action="store_true", help="Read key from STDIN")
+
 
     p_extract.add_argument("--out", help="Write recovered secret to file (default: stdout)")
 

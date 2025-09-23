@@ -1,3 +1,4 @@
+.vscode/
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[codz]
@@ -57,6 +58,7 @@ cover/
 
 # Django stuff:
 *.log
+*.pid
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -205,3 +207,8 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+db/
+storage/
+
+secrets.json

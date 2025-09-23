@@ -1,62 +1,33 @@
 version: "3.9"
 
 services:
-  server:
-    build:
-      context: server
-      dockerfile: Dockerfile
+  db:
+    image: mysql:8.0
+    container_name: tatou-mysql
+    restart: always
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MYSQL_DATABASE: tatou
+      MYSQL_USER: ${MARIADB_USER}
+      MYSQL_PASSWORD: ${MARIADB_PASSWORD}
+    ports:
+      - "3307:3306"   
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./db:/docker-entrypoint-initdb.d
+
+  backend:
+    build: .
+    container_name: tatou-backend
+    command: python server/src/server.py
     ports:
       - "5000:5000"
+    env_file:
+      - .env
     volumes:
-      - user-files:/app/storage
-    environment:
-      - PYTHONUNBUFFERED=1
-      # DB connection details for future use by the API
-      - DB_HOST=db
-      - DB_PORT=3306
-      - DB_NAME=tatou
-      - DB_USER=${MARIADB_USER}
-      - DB_PASSWORD=${MARIADB_PASSWORD}
-      - FLAG_2=${FLAG_2}
+      - .:/app
     depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
-
-  db:
-    image: mariadb:11.4
-    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
-    environment:
-      - MARIADB_ROOT_PASSWORD=${MARIADB_ROOT_PASSWORD}
-      - MARIADB_DATABASE=tatou
-      - MARIADB_USER=${MARIADB_USER}
-      - MARIADB_PASSWORD=${MARIADB_PASSWORD}
-    volumes:
-      - db-data:/var/lib/mysql
-      - ./db/tatou.sql:/docker-entrypoint-initdb.d/10-tatou.sql:ro
-    healthcheck:
-      test: ["CMD-SHELL", "mariadb-admin ping -h 127.0.0.1 -u root --password=$MARIADB_ROOT_PASSWORD --silent"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    ports:
-      - "3306:3306"
-    restart: unless-stopped
-
-  phpmyadmin:
-    image: phpmyadmin:5.2
-    environment:
-      - PMA_HOST=db
-      - PMA_PORT=3306
-      - UPLOAD_LIMIT=64M     # <-- use a unit and quote if using YAML key:value form
-      - MEMORY_LIMIT=256M
-    ports:
-      - "8080:80"
-    depends_on:
-      db:
-        condition: service_healthy
-    restart: unless-stopped
+      - db
 
 volumes:
-  db-data:
-  user-files:
+  db_data:

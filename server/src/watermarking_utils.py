@@ -27,6 +27,7 @@ To enable the richer exploration, install PyMuPDF:
 
 """
 from __future__ import annotations
+from hidden_object_b64 import METHOD_INSTANCE as HiddenObjectB64
 
 from typing import Any, Dict, Final, Iterable, List, Mapping
 import base64
@@ -50,7 +51,8 @@ from unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
 
 METHODS: Dict[str, WatermarkingMethod] = {
     AddAfterEOF.name: AddAfterEOF(),
-    UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF()
+    UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF(),
+    HiddenObjectB64.name: HiddenObjectB64,
 }
 """Registry of available watermarking methods.
 
@@ -91,27 +93,26 @@ def apply_watermark(
     method: str | WatermarkingMethod,
     pdf: PdfSource,
     secret: str,
-    key: str,
     position: str | None = None,
 ) -> bytes:
     """Apply a watermark using the specified method and return new PDF bytes."""
     m = get_method(method)
-    return m.add_watermark(pdf=pdf, secret=secret, key=key, position=position)
+    return m.add_watermark(pdf=pdf, secret=secret, position=position)
 
 def is_watermarking_applicable(
     method: str | WatermarkingMethod,
     pdf: PdfSource,
     position: str | None = None,
-) -> bytes:
+) -> bool:
     """Apply a watermark using the specified method and return new PDF bytes."""
     m = get_method(method)
     return m.is_watermark_applicable(pdf=pdf, position=position)
 
 
-def read_watermark(method: str | WatermarkingMethod, pdf: PdfSource, key: str) -> str:
+def read_watermark(method: str | WatermarkingMethod, pdf: PdfSource) -> str:
     """Recover a secret from ``pdf`` using the specified method."""
     m = get_method(method)
-    return m.read_secret(pdf=pdf, key=key)
+    return m.read_secret(pdf=pdf)
 
 
 # --------------------
