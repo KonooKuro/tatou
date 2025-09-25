@@ -54,9 +54,3 @@ CREATE TABLE IF NOT EXISTS `Versions` (
     FOREIGN KEY (`documentid`) REFERENCES `Documents`(`id`)
     ON UPDATE CASCADE ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- Create application user and grant privileges
--- Shen 9.20: Keep original user creation but note that app connects with DB_USER/DB_PASSWORD from env
-CREATE USER IF NOT EXISTS 'Konoha'@'%' IDENTIFIED BY '4Ce939154f!!';
-GRANT ALL PRIVILEGES ON tatou.* TO 'Konoha'@'%';
-FLUSH PRIVILEGES;
