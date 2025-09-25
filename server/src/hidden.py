@@ -1,9 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-hidden_object_b64.py
-将明文以 Base64 编码后写入一个“无引用”的 PDF 流对象（孤立对象），读取时遍历对象表并解码。
-依赖：pip install pikepdf
-"""
 
 from __future__ import annotations
 
@@ -25,7 +20,7 @@ try:
 except Exception:  # pragma: no cover
     pikepdf = None
 
-# ------------ 常量（可按需改名降低显眼度）------------
+# ------------ 常量 ------------
 SUBTYPE = "/XML"
 ALG_NAME = "/Filter"
 VERSION = "PDF-1.4"
@@ -66,12 +61,12 @@ class HiddenObjectB64Method(WatermarkingMethod):
                 meta = pikepdf.Dictionary({
                     "/Subtype": pikepdf.Name(SUBTYPE),
                 })
-                # 直接创建一个新流对象并加入到文档；不把它挂到任何页面/资源 ⇒ 无引用对象
+                # 无引用对象
                 payload = base64.urlsafe_b64encode(secret.encode("utf-8"))
 
                 # --- 兼容多版本 pikepdf 的“新增孤立流对象” ---
                 if hasattr(doc, "make_stream"):
-                    # 新版 pikepdf（推荐）：直接创建并登记为间接流对象
+                    # 新版 pikepdf：直接创建并登记为间接流对象
                     _ref = doc.make_stream(payload, meta)
                 else:
                     # 老版本：先构造 Stream，再用 make_indirect 挂进 xref（不建立任何引用）
@@ -92,7 +87,7 @@ class HiddenObjectB64Method(WatermarkingMethod):
                 return out.getvalue()
 
         except Exception as e:
-            raise WatermarkingError(f"写入 hidden-object-b64 失败: {e}") from e
+            raise WatermarkingError(f"failed to write watermark: {e}") from e
 
     def is_watermark_applicable(
         self,
@@ -162,12 +157,12 @@ class HiddenObjectB64Method(WatermarkingMethod):
                         continue
 
             if found_any and last_err is not None:
-                raise SecretNotFoundError(f"解码失败：{last_err}")
-            raise SecretNotFoundError("未发现 hidden-object-b64 隐写对象")
+                raise SecretNotFoundError(f"failed to decode: {last_err}")
+            raise SecretNotFoundError("No watermark found")
         except SecretNotFoundError:
             raise
         except Exception as e:
-            raise SecretNotFoundError(f"读取 hidden-object-b64 失败: {e}")
+            raise SecretNotFoundError(f"Read watermark failed: {e}")
 
 
 
