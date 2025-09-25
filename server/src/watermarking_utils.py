@@ -27,7 +27,7 @@ To enable the richer exploration, install PyMuPDF:
 
 """
 from __future__ import annotations
-from hidden_object_b64 import METHOD_INSTANCE as HiddenObjectB64
+from hidden import METHOD_INSTANCE as HiddenObjectB64
 
 from typing import Any, Dict, Final, Iterable, List, Mapping
 import base64
@@ -50,8 +50,6 @@ from unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
 # --------------------
 
 METHODS: Dict[str, WatermarkingMethod] = {
-    AddAfterEOF.name: AddAfterEOF(),
-    UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF(),
     HiddenObjectB64.name: HiddenObjectB64,
 }
 """Registry of available watermarking methods.

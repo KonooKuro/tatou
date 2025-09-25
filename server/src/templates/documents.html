@@ -222,8 +222,6 @@
       openModal('Create watermark for #' + documentId, `
         <form id="createWmForm" class="form-vertical">
           <label>Method<select name="method" required><option value="" disabled selected>Select a method</option>${options}</select></label>
-          <label>Position<input name="position" placeholder="Position"></label>
-          <label>Key<input name="key" placeholder="Reader key"></label>
           <label>Secret<input name="secret" placeholder="Secret embedded in WM" required></label>
           <label>Intended for<input name="intended_for" placeholder="Recipient or purpose"></label>
           <div class="row-actions">
@@ -256,8 +254,6 @@
       openModal('Read watermark for #' + documentId, `
         <form id="readWmForm" class="form-vertical" method="post" action="javascript:void(0)">
           <label>Method<select name="method" required><option value="" disabled selected>Select a method</option>${options}</select></label>
-          <label>Position<input name="position" placeholder="Position"></label>
-          <label>Key<input name="key" placeholder="Reader key"></label>
           <div class="row-actions">
             <button class="btn" type="button" id="cancelRead">Cancel</button>
             <button class="btn btn--primary" type="submit">Read</button>
