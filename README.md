@@ -1,5 +1,3 @@
-# This is a test of Group7-tatou, if you can see this msg, which means you connect to the Git successfully!
-
 # tatou
 A web platform for pdf watermarking. This project is intended for pedagogical use, and contain security vulnerabilities. Do not deploy on an open network.
 
