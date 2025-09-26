@@ -212,3 +212,9 @@ db/
 storage/
 
 secrets.json
+
+# PGP密钥文件
+tatou_keys/
+*.asc
+*.key
+*.pem

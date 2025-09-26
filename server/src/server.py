@@ -21,6 +21,7 @@ from flask import Flask, jsonify, request, g, send_file, current_app, render_tem
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
+from rmap_routes import rmap_bp
 
 # 数据库支持：同时支持PyMySQL和SQLAlchemy
 try:
@@ -49,6 +50,9 @@ except ImportError:
 # -----------------------------------------------------------------------------
 def create_app():
     app = Flask(__name__)
+    
+    #WJJ: REGISTER RMAP BLUEPRINT
+    app.register_blueprint(rmap_bp, url_prefix="/rmap")
 
     # --- 安全配置 ---
     app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY")
@@ -1107,8 +1111,6 @@ def create_app():
             return jsonify({"ok": False, "error": "internal_error"}), 500
 
         return jsonify({
-            "ok": True,
-            "documentid": doc_id,
             "secret": secret,
         }), 200
 

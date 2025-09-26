@@ -26,6 +26,7 @@ services:
       - .env
     volumes:
       - .:/app
+      - ./tatou_keys:/home/wjj/tatou-team2/tatou_keys:ro
     depends_on:
       - db
 
