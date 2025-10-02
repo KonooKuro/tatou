@@ -981,6 +981,8 @@ def create_app():
         position = payload.get("position") or None
         link = (payload.get("link") or "").strip() or None
         use_latest = bool(payload.get("latest"))
+        from_original = bool(payload.get("from_original"))
+        source = (payload.get("source") or "").strip().lower()
 
         # 基础校验
         try:
@@ -1025,7 +1027,19 @@ def create_app():
 
         # 决定读取哪个PDF：指定版本/最新版本/原始文件
         target_path: pathlib.Path
-        if link:
+        source_type = "original"  # 仅用于日志或调试，不改变响应结构
+        storage_root = app.config["STORAGE_DIR"]
+
+        def _original_path():
+            return _safe_resolve_under_storage(doc_row.path, storage_root)
+
+        # 1) 显式强制读原件
+        if from_original or source == "original":
+            target_path = _original_path()
+            source_type = "original"
+
+        # 2) link 分支：找不到版本就回退原件
+        elif link:
             try:
                 if HAS_SQLALCHEMY:
                     with db_connect() as conn:
@@ -1052,19 +1066,23 @@ def create_app():
                         v_data = cur.fetchone()
                         if v_data:
                             class VerRow:
-                                def __init__(self, data):
-                                    self.path = data[0]
+                                def __init__(self, data): self.path = data[0]
                             v = VerRow(v_data)
                         else:
                             v = None
             except Exception:
                 return jsonify({"ok": False, "error": "internal_error"}), 500
 
-            if not v:
-                return jsonify({"ok": False, "error": "not_found"}), 404
-            target_path = _safe_resolve_under_storage(v.path, storage_root)
+            if v:
+                target_path = _safe_resolve_under_storage(v.path, storage_root)
+                source_type = "version_by_link"
+            else:
+                current_app.logger.warning("read_watermark: link not found, fallback to original (doc_id=%s)", doc_id)
+                target_path = _original_path()
+                source_type = "original_fallback_from_link"
 
-        elif use_latest:
+        # 3) latest 分支：没版本就回退原件
+        elif use_latest or source == "latest":
             try:
                 if HAS_SQLALCHEMY:
                     with db_connect() as conn:
@@ -1079,23 +1097,26 @@ def create_app():
                         v_data = cur.fetchone()
                         if v_data:
                             class VerRow:
-                                def __init__(self, data):
-                                    self.path = data[0]
+                                def __init__(self, data): self.path = data[0]
                             v = VerRow(v_data)
                         else:
                             v = None
             except Exception:
                 return jsonify({"ok": False, "error": "internal_error"}), 500
 
-            if not v:
-                return jsonify({"ok": False, "error": "not_found", "detail": "no_versions"}), 404
-            target_path = _safe_resolve_under_storage(v.path, storage_root)
-        else:
-            # 默认读原始文档
-            target_path = _safe_resolve_under_storage(doc_row.path, storage_root)
+            if v:
+                target_path = _safe_resolve_under_storage(v.path, storage_root)
+                source_type = "latest_version"
+            else:
+                current_app.logger.info("read_watermark: no versions; fallback to original (doc_id=%s)", doc_id)
+                target_path = _original_path()
+                source_type = "original_fallback_from_latest"
 
-        if not target_path.exists():
-            return jsonify({"ok": False, "error": "gone"}), 410
+        # 4) 默认读原件
+        else:
+            target_path = _original_path()
+            source_type = "original"
+
 
         # 真正读取
         try:
